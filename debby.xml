@@ -1,0 +1,18 @@
+<?xml version="1.0" ?>
+<?xml-stylesheet type='text/xsl' href='interface.xsl'?>
+<interface uri="http://gfxmonk.net/dist/0install/debby.xml" xmlns="http://zero-install.sourceforge.net/2004/injector/interface">
+	<name>debby</name>
+	<summary>WIP</summary>
+	<description>
+	</description>
+	<group>
+		<command name="run" path="debby.py">
+			<runner interface="http://repo.roscidus.com/python/python">
+				<version before="3"/>
+			</runner>
+		</command>
+		<requires interface="http://gfxmonk.net/dist/0install/proot.xml"/>
+		<implementation id="." version="0.0.1">
+		</implementation>
+	</group>
+</interface>
