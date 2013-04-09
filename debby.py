@@ -296,9 +296,9 @@ def main():
 
 	tempdir = tempfile.mkdtemp()
 
-	if opts.no_chroot is None and 'chroot' in spec:
-		use_chroot = not opts.no_chroot
-	use_chroot = not opts.no_chroot
+	use_chroot = spec.get('chroot', True)
+	if opts.no_chroot:
+		use_chroot = False
 	if spec['env']:
 		args = ['env']
 		for key, val in spec['env'].items():
