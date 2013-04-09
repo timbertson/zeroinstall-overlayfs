@@ -110,8 +110,8 @@ def parse_depends(s):
 
 
 def download_packages_file(url):
-	LOGGER.info("Downloading: %s" % url,)
 	packages_filename = os.path.join(CACHE_DIR, "Packages-%s" % (hashlib.md5(url).hexdigest()[:10]))
+	LOGGER.info("Downloading: %s -> %s", url, packages_filename)
 	if os.path.exists(packages_filename):
 		LOGGER.info("Using cached %s" % (packages_filename))
 	else:
@@ -143,6 +143,9 @@ class RepositorySource(object):
 	def repositories(self):
 		for (component, arch) in itertools.product(self.components, self.arches):
 			yield Repository(self, component, arch)
+	
+	def __repr__(self):
+		return "RepositorySource({base}, {distribution}, {components}, {arches})".format(**self.__dict__)
 	
 class Repository(object):
 	def __init__(self, repository, component, arch):
@@ -184,6 +187,7 @@ class Repository(object):
 
 class PackageCache(object):
 	def __init__(self, repository_sources):
+		assert len(repository_sources) > 0, "empty cache created"
 		self.sources = repository_sources
 	
 	@property
@@ -243,40 +247,86 @@ def download_all(name, package_map, exclude=[]):
 
 def main():
 	import optparse
-	p = optparse.OptionParser()
-	p.add_option("-p", "--package")
-	p.add_option("--print-deps", action='store_true')
+	p = optparse.OptionParser("usage: debby.py [OPTS] specfile -- [arg ...]")
+	p.add_option("-l", "--list-deps", action='store_true')
 	p.add_option("-v", "--verbose", action="store_true")
+	p.add_option("-n", "--no-chroot", action="store_true")
+	p.add_option("-c", "--ignore-command", action="store_true")
+	p.add_option("-d", "--debug", action="store_true", help="wait for user input before cleaning up")
 	opts, cmd = p.parse_args()
-	assert opts.package, "Must provide a package"
+	assert len(cmd) > 0, "must provide a spec file"
+	specfile = cmd.pop(0)
+
+	import json
+	if specfile == '-':
+		spec = json.load(sys.stdin)
+	else:
+		with open(specfile) as f:
+			spec = json.load(f)
+
+	if not opts.ignore_command:
+		cmd = spec['command'] + cmd
+
+	assert spec['package'], "Must specify a package"
 	level = logging.DEBUG if opts.verbose else logging.INFO
 	logging.basicConfig(level=level)
+	logging.getLogger('make_overlay').setLevel(level)
 	LOGGER.setLevel(level)
 
-	SOURCES = [
-		RepositorySource("http://au.archive.ubuntu.com/ubuntu", "quantal", ["main"], ["amd64"]),
-	]
+	def make_repo(args):
+		try:
+			return RepositorySource(*args)
+		except TypeError:
+			print "invalid repo: %r" %(args,)
+			raise
 
-	PACKAGE_MAP=PackageCache(SOURCES).packages
+	repo_sources = list(map(make_repo, spec['repos']))
+	logging.info("repo sources:\n  %s", "\n  ".join(map(repr, repo_sources)))
+	if not repo_sources:
+		raise RuntimeError("you must provide at least one repo")
+	package_map=PackageCache(repo_sources).packages
 
-	if opts.print_deps:
-		for dep in sorted(rdepends(opts.package, PACKAGE_MAP)):
+	if opts.list_deps:
+		for dep in sorted(rdepends(spec['package'], package_map)):
 			print " - %s" % (dep,)
 		return
 
-	roots = download_all(opts.package, PACKAGE_MAP, exclude=["libc6"])
+	roots = download_all(spec['package'], package_map, exclude=["libc6"])
 	roots = list(map(os.path.abspath, roots))
 
 	tempdir = tempfile.mkdtemp()
+
+	if opts.no_chroot is None and 'chroot' in spec:
+		use_chroot = not opts.no_chroot
+	use_chroot = not opts.no_chroot
+	if spec['env']:
+		args = ['env']
+		for key, val in spec['env'].items():
+			if isinstance(val, list):
+				# prepend it:
+				existing = list(filter(None, os.environ.get(key, '').split(":")))
+				val = (val + existing)
+				if not use_chroot:
+					val = [os.path.normpath("%s/%s" % (tempdir, v)) for v in val]
+				val = ":".join(val)
+			args.append("%s=%s" % (key, val))
+		cmd = args + cmd
+
 	LOGGER.info("making chroot in: %s", tempdir)
-	with make_overlay.overlayfs(chroot = tempdir, overlay_roots = roots, sacred_paths = ['/home', '/tmp'], prefer_existing_files=['/etc']):
-		cmd = ["proot", "-r", tempdir, "--bind=/:/" + make_overlay.ROOT_FOLDER_NAME] + cmd
+	with make_overlay.overlayfs(chroot = tempdir, overlay_roots = roots, sacred_paths = ['/home', '/tmp'], prefer_existing_files=['/etc'], chroot_dests=use_chroot):
+		if use_chroot:
+			cmd = ["proot", "-r", tempdir, "--bind=/:/" + make_overlay.ROOT_FOLDER_NAME] + cmd
 		print "running cmd: %r" % (cmd,)
+		print "overlay root: %s" % (tempdir,)
 		try:
 			subprocess.check_call(cmd)
+		except subprocess.CalledProcessError as e:
+			LOGGER.info("command failed.")
+			sys.exit(1)
 		finally:
-			print "Command exited. Press return to continue cleanup (tempdir = %s)" % (tempdir,)
-			raw_input()
+			if opts.debug:
+				print "Command exited. Press return to continue cleanup (tempdir = %s)" % (tempdir,)
+				raw_input()
 
 if __name__ == '__main__':
 	main()

@@ -57,7 +57,7 @@ def action(fn, *a):
 	return fn(*a)
 
 @contextlib.contextmanager
-def overlayfs(chroot, overlay_roots, sacred_paths=[], prefer_existing_files=[]):
+def overlayfs(chroot, overlay_roots, sacred_paths=[], prefer_existing_files=[], chroot_dests=True):
 
 	# turn into relative paths (from root)
 	def relative_folder_path(p):
@@ -77,7 +77,7 @@ def overlayfs(chroot, overlay_roots, sacred_paths=[], prefer_existing_files=[]):
 
 	ensure_dir(root_path)
 	try:
-		apply_overlay_mapping(chroot, root_folder_name, overlay_roots, sacred_paths, prefer_existing_files)
+		apply_overlay_mapping(chroot, root_folder_name, overlay_roots, sacred_paths, prefer_existing_files, chroot_dests=chroot_dests)
 		LOGGER.debug("MOUNTS: %r",mounts)
 		yield
 	except:
@@ -149,7 +149,7 @@ def is_prefix_of(a,b):
 	b = os.path.normpath(os.path.join("/",b)) + "/"
 	return b.startswith(a)
 
-def apply_overlay_mapping(chroot, root_folder_name, overlay_roots, sacred_paths, prefer_existing_files):
+def apply_overlay_mapping(chroot, root_folder_name, overlay_roots, sacred_paths, prefer_existing_files, chroot_dests=True):
 	ROOT = "/"
 	def try_place(source, relpath):
 		# if relpath in SYSTEM_MOUNTPOINTS:
@@ -157,7 +157,28 @@ def apply_overlay_mapping(chroot, root_folder_name, overlay_roots, sacred_paths,
 		# 	return True
 		assert not os.path.isabs(relpath)
 		link_path = os.path.join(chroot, relpath)
-		link_dest = os.path.normpath("/%s/%s" % (root_folder_name, os.path.join(source, relpath)))
+		link_dest = os.path.join(source, relpath)
+
+		target = None
+		try:
+			target = os.readlink(link_dest)
+		except OSError as e:
+			# probably not a symlink!
+			pass
+	
+		if target and source != ROOT:
+			# For symlinks that come from an overlay, we
+			# retarget them in case they point to a file in a different overlay.
+			dest_base = ROOT if chroot_dests else chroot
+			if os.path.isabs(target):
+				link_dest = os.path.join(dest_base, target.lstrip('/'))
+			else:
+				# path relative to the link's source
+				link_dest = os.path.join(dest_base, os.path.join(os.path.dirname(relpath)), target)
+			LOGGER.debug("retargeted %s -> %s" , os.path.join(source, relpath), link_dest)
+		else:
+			if chroot_dests:
+				link_dest = os.path.normpath("/%s/%s" % (root_folder_name, link_dest))
 
 		parent = os.path.dirname(link_path)
 		if not os.path.lexists(parent):
@@ -202,10 +223,13 @@ def apply_overlay_mapping(chroot, root_folder_name, overlay_roots, sacred_paths,
 			if relpath in sacred_paths:
 				# always use the root source for this path, regardless of overlay contents
 				LOGGER.debug("path %s is sacred - using ROOT", relpath)
-				assert(try_place, ROOT, relpath)
+				assert try_place(ROOT, relpath)
 				continue
 
-			if len(sources) == 1:
+			if len(sources) == 1 and sources[0] == ROOT:
+				# we only terminate the overlay tree on a unique root branch
+				# - all overlay trees must be fully traversed in order to retarget
+				# symbolic links correctly
 				LOGGER.debug("found singular: %s (in %s)", relpath, source)
 				if try_place(source, relpath):
 					continue
@@ -269,4 +293,3 @@ def become_user(name=None):
 
 if __name__ == '__main__':
 	main()
-

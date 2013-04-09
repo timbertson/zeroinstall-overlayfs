@@ -12,6 +12,9 @@
 			</runner>
 		</command>
 		<requires interface="http://gfxmonk.net/dist/0install/proot.xml"/>
+		<requires interface="http://0install.net/2007/interfaces/ZeroInstall.xml">
+			<environment insert="" name="PYTHONPATH" mode="prepend"/>
+		</requires>
 		<implementation id="." version="0.0.1">
 		</implementation>
 	</group>
