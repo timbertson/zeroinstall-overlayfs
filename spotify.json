@@ -1,0 +1,14 @@
+{
+	"description": "an example specfile, this one runs the linux spotify client",
+	"package": "spotify-client",
+	"chroot": false,
+	"repos": [
+		["http://au.archive.ubuntu.com/ubuntu", "quantal", ["main", "universe"], ["amd64"]],
+		["http://repository.spotify.com", "stable", ["non-free"], ["amd64"]]
+	],
+	"env": {
+		"LD_LIBRARY_PATH": ["/lib64", "/usr/lib64", "/usr/lib", "/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu"],
+		"PATH": []
+	},
+	"command": ["spotify"]
+}

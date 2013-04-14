@@ -14,7 +14,8 @@ import logging
 import make_overlay
 LOGGER = logging.getLogger(__name__)
 
-CACHE_DIR = 'debcache'
+from xdg import BaseDirectory
+CACHE_DIR = BaseDirectory.save_cache_path('rundeb')
 if not os.path.exists(CACHE_DIR):
 	os.makedirs(CACHE_DIR)
 
@@ -247,7 +248,7 @@ def download_all(name, package_map, exclude=[]):
 
 def main():
 	import optparse
-	p = optparse.OptionParser("usage: debby.py [OPTS] specfile -- [arg ...]")
+	p = optparse.OptionParser("usage: rundeb [OPTS] specfile -- [arg ...]")
 	p.add_option("-l", "--list-deps", action='store_true')
 	p.add_option("-v", "--verbose", action="store_true")
 	p.add_option("-n", "--no-chroot", action="store_true")
