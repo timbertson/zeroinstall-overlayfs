@@ -133,6 +133,18 @@ def download_packages_file(url):
 			raise
 	return packages_filename
 
+class FlatRepositorySource(object):
+	def __init__(self, base, path):
+		self.base = base
+		self.path = path
+
+	@property
+	def repositories(self):
+		yield FlatRepository(self, self.path)
+
+	def __repr__(self):
+		return "FlatRepositorySource({base}, {path})".format(**self.__dict__)
+
 class RepositorySource(object):
 	def __init__(self, base, distribution, components, arches):
 		self.base = base
@@ -147,8 +159,21 @@ class RepositorySource(object):
 	
 	def __repr__(self):
 		return "RepositorySource({base}, {distribution}, {components}, {arches})".format(**self.__dict__)
-	
-class Repository(object):
+
+class BaseRepository(object):
+	@property
+	def packages(self):
+		for packages_url in self.packages_urls:
+			packages_file = download_packages_file(packages_url)
+			packagefile = debian_support.PackageFile(packages_file)
+			for package in packagefile:
+				pd = dict(package)
+				id = pd.pop("Package")
+				pd['repo'] = self
+				yield (id, pd)
+
+
+class Repository(BaseRepository):
 	def __init__(self, repository, component, arch):
 		self.repository = repository
 		self.component = component
@@ -175,17 +200,20 @@ class Repository(object):
 		arch = package_info.get('Architecture', self.arch)
 		return "{self.repository.base}/pool/{self.component}/{letter}/{source}/{package_id}_{version}_{arch}.deb".format(**locals())
 	
-	@property
-	def packages(self):
-		for packages_url in self.packages_urls:
-			packages_file = download_packages_file(packages_url)
-			packagefile = debian_support.PackageFile(packages_file)
-			for package in packagefile:
-				pd = dict(package)
-				id = pd.pop("Package")
-				pd['repo'] = self
-				yield (id, pd)
+class FlatRepository(BaseRepository):
+	def __init__(self, repository, path):
+		self.repository = repository
+		self.path = path
 
+	@property
+	def packages_urls(self):
+		yield "{self.repository.base}/{self.path}/Packages.gz".format(self=self)
+	
+	def deb_url(self, package_id, package_info):
+		version = package_info['Version']
+		arch = package_info.get('Architecture')
+		return "{self.repository.base}/{self.path}/{package_id}_{version}_{arch}.deb".format(**locals())
+	
 class PackageCache(object):
 	def __init__(self, repository_sources):
 		assert len(repository_sources) > 0, "empty cache created"
@@ -275,8 +303,9 @@ def main():
 	LOGGER.setLevel(level)
 
 	def make_repo(args):
+		cls = FlatRepositorySource if len(args) == 2 else RepositorySource
 		try:
-			return RepositorySource(*args)
+			return cls(*args)
 		except TypeError:
 			print "invalid repo: %r" %(args,)
 			raise
